@@ -1,0 +1,325 @@
+---
+title: "Reporte estadístico del Índice de Adopción de TIC'S"
+subtitle: "Centro de Investigación Estadística ERGOSTATS"
+author:
+  - Alex Bajaña
+format: 
+  html:
+    toc: true
+    code-fold: true
+editor: visual
+server: shiny
+---
+
+# Versión de R
+
+```{r}
+R.version
+```
+
+# Librerias
+
+```{r, eval=FALSE}
+library(tidyverse)
+library(here)
+library(survey)
+library(srvyr)
+library(gt)
+library(gtExtras)
+library(sf)
+library(shiny)
+```
+
+# Lectura de datos
+
+```{r}
+#| context: setup
+#| include: false
+
+
+library(tidyverse)
+library(here)
+library(survey)
+library(srvyr)
+library(gt)
+library(gtExtras)
+library(sf)
+library(shiny)
+library(ggiraph)
+
+datos <- read_delim("modulo_tics_indicador.txt",delim = "\t")
+
+diccionario <- read_rds("provincias.rds")
+
+tabla_svy <- as_survey_design(.data = datos,
+                              ids = id_empresa,
+                              probs = f_exp)
+
+prov <- read_rds('provincias_corregidas.rds')
+
+```
+
+# Análisis comparativo
+
+## Calculo del indicador global promedio
+
+```{r, eval=FALSE, echo=TRUE}
+
+library(tidyverse)
+library(here)
+library(survey)
+library(srvyr)
+library(gt)
+library(gtExtras)
+library(sf)
+library(shiny)
+library(ggiraph)
+
+datos <- read_delim(here("bases/procesadas/modulo_tics_indicador.txt"),delim = "\t")
+
+diccionario <- read_rds(here("bases/diccionarios/provincias.rds"))
+
+tabla_svy <- as_survey_design(.data = datos,
+                              ids = id_empresa,
+                              probs = f_exp)
+
+prov <- read_rds(here('bases/provincias_corregidas.rds'))
+
+tabla_svy <- as_survey_design(.data = datos,
+                              ids = id_empresa,
+                              probs = f_exp)
+```
+
+## Ranking de provincias 
+
+```{r}
+fluidRow(
+  column(6,
+         sliderInput("year", "Año", 
+            min = 2018, max = 2021, value = 2020)
+  ),
+  column(6,
+         selectInput("industria",label = "Sector económico",
+                     choices = unique(datos$des_sector))
+))
+```
+
+::: {.panel-tabset}
+
+## Por promedio
+```{r}
+         gt_output("ranking_provincia_promedio")
+```
+
+## Por mediana
+```{r}
+         gt_output("ranking_provincia_mediana")
+
+```
+:::
+
+
+
+La enesem comparte la misma estructura en las bases de datos 2018-2021, por lo que se puede realizar un análisis comparativo de los indicadores de adopción de TIC's en las provincias.
+
+
+## Mapas
+
+::: {.panel-tabset}
+
+## Por promedio
+```{r}
+girafeOutput("mapa_promedio")
+```
+
+## Por mediana
+```{r}
+girafeOutput("mapa_mediana")
+
+```
+:::
+
+
+```{r}
+#| context: server
+
+
+
+tabla_provincia <- reactive({
+  tabla_svy %>% 
+    filter(anio_fiscal == input$year,
+           des_sector == input$industria) %>%
+    group_by(provincia) %>%
+    summarise(promedio = survey_mean(indicador_z, na.rm = TRUE),
+              n = survey_total( na.rm = TRUE)) %>%
+    left_join(diccionario)
+})
+
+tabla_provincia_2 <- reactive({
+  tabla_svy %>% 
+    filter(anio_fiscal == input$year,
+           des_sector == input$industria) %>%
+    group_by(provincia) %>%
+    summarise(promedio = survey_median(indicador_z, na.rm = TRUE),
+              n = survey_total( na.rm = TRUE)) %>%
+    left_join(diccionario)
+})
+
+output$ranking_provincia_promedio <- render_gt({
+  
+  tabla_provincia <- tabla_provincia() %>%
+    arrange(desc(promedio)) %>% 
+    rowid_to_column(var = "Ranking")
+  
+  ranking <- tabla_provincia %>%
+    arrange(desc(promedio)) %>% 
+    select(Ranking,everything()) %>%
+    gt() %>%
+    fmt_number(columns = vars(promedio), decimals = 2) %>%
+    fmt_number(columns = vars(n), decimals = 0) %>%
+    tab_header(title = "Ranking de provincias",
+               subtitle = "Promedio de adopción de TIC's por provincia") %>% 
+    cols_label(provincia = "Provincia",
+               promedio = "Promedio",
+               n = "N") %>% 
+    cols_hide(c(provincia, matches("_se$"))) 
+  
+  # Pintar la fila donde está manabi en la columna provincia
+  
+  ranking <- ranking %>%
+    data_color(
+    columns = promedio,
+    fn = scales::col_numeric(
+      palette = "viridis",
+      domain = c(0, max(tabla_provincia()$promedio)),
+      reverse = TRUE
+    )
+  ) %>% 
+    tab_style(
+    style = cell_fill(color = "#2dc937", alpha = 0.5),
+    locations = select(tabla_provincia,provincia_label) %>%
+      map2(.y = names(select(tabla_provincia,provincia_label)),
+           .f = function(.x,.y) {cells_body(columns = .y,
+                                            rows = which(.x == "Manabí" ))
+                                 }
+      )
+   )
+  
+})
+
+output$ranking_provincia_mediana <- render_gt({
+  
+  tabla_provincia <- tabla_provincia_2() %>%
+    arrange(desc(promedio)) %>% 
+    rowid_to_column(var = "Ranking")
+  
+  ranking <- tabla_provincia %>%
+    arrange(desc(promedio)) %>% 
+    select(Ranking,everything()) %>%
+    gt() %>%
+    fmt_number(columns = vars(promedio), decimals = 2) %>%
+    fmt_number(columns = vars(n), decimals = 0) %>%
+    tab_header(title = "Ranking de provincias",
+               subtitle = "Promedio de adopción de TIC's por provincia") %>% 
+    cols_label(provincia = "Provincia",
+               promedio = "Promedio",
+               n = "N") %>% 
+    cols_hide(c(provincia, matches("_se$"))) 
+  
+  # Pintar la fila donde está manabi en la columna provincia
+  
+  ranking <- ranking %>%
+    data_color(
+    columns = promedio,
+    fn = scales::col_numeric(
+      palette = "viridis",
+      domain = c(0, max(tabla_provincia()$promedio)),
+      reverse = TRUE
+    )
+  ) %>% 
+    tab_style(
+    style = cell_fill(color = "#2dc937", alpha = 0.5),
+    locations = select(tabla_provincia,provincia_label) %>%
+      map2(.y = names(select(tabla_provincia,provincia_label)),
+           .f = function(.x,.y) {cells_body(columns = .y,
+                                            rows = which(.x == "Manabí" ))
+                                 }
+      )
+   )
+  
+})
+
+output$mapa_promedio <- renderGirafe({
+  datos_ratio <- left_join(prov,
+                         tabla_provincia(), by = c("DPA_PROVIN" = "provincia")) %>% 
+    mutate(tooltip = paste0("Provincia: ", DPA_DESPRO, "<br>",
+                            "Promedio: ", round(promedio,4), "<br>",
+                            "Empreas:" , n), label = NA_character_)
+
+  plot <- ggplot(data = datos_ratio) +
+    geom_sf_interactive(
+      aes(fill = promedio,tooltip = tooltip),
+      data = datos_ratio,
+      color = 'gray',
+      size = 0.3
+    ) +
+  guides(fill = guide_colorbar(title = "Promedio")) +
+  scale_fill_viridis_c() +
+  theme(axis.text = element_blank(),
+          strip.text = element_text(family = 'Anton',
+                                    size = 10)) +
+    labs(title = "Promedio por Año, por Provincia y por Sector") +
+    theme(
+      plot.title = element_text(family = 'Anton', size = 20),
+      plot.subtitle = element_text(family = 'Anton'),
+      strip.text = element_text(
+        family = 'Anton',
+        face = 'bold',
+        size = 9,
+        color = 'black'
+      ),
+      strip.background = element_rect(fill = 'white')
+    ) +
+    theme_minimal()
+
+girafe( ggobj = plot)
+})
+
+output$mapa_mediana <- renderGirafe({
+  datos_ratio <- left_join(prov,
+                         tabla_provincia_2(), by = c("DPA_PROVIN" = "provincia")) %>% 
+    mutate(tooltip = paste0("Provincia: ", DPA_DESPRO, "<br>",
+                            "Promedio: ", round(promedio,4), "<br>",
+                            "Empreas:" , n), label = NA_character_)
+
+  plot <- ggplot(data = datos_ratio) +
+    geom_sf_interactive(
+      aes(fill = promedio,tooltip = tooltip),
+      data = datos_ratio,
+      color = 'gray',
+      size = 0.3
+    ) +
+    guides(fill = guide_colorbar(title = "Promedio")) +
+    scale_fill_viridis_c() +
+    theme(axis.text = element_blank(),
+          strip.text = element_text(family = 'Anton',
+                                    size = 10)) +
+    labs(title = "Promedio por Año, por Provincia y por Sector") +
+    theme(
+      plot.title = element_text(family = 'Anton', size = 20),
+      plot.subtitle = element_text(family = 'Anton'),
+      strip.text = element_text(
+        family = 'Anton',
+        face = 'bold',
+        size = 9,
+        color = 'black'
+      ),
+      strip.background = element_rect(fill = 'white')
+    ) +
+    theme_minimal()
+
+girafe( ggobj = plot)
+})
+
+```
+
